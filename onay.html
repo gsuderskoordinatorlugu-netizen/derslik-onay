@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Derslik Talebi · Onay</title>
+<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik). Talep verisi #fragment ile gelir; gönderim Apps Script köprüsüne (EXEC) kimlik bilgisi taşımayan fetch POST ile yapılır — birden fazla Google hesabı açık olsa bile çalışır. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#f6f5f1; --surface:#ffffff; --ink:#1d1d1b; --ink-2:#4b4a45; --muted:#7b7a73; --line:#dcdad2;
+    --accent:#7a1f2b; --accent-ink:#5e1620; --ok:#2f6b3a; --ok-bg:#e9f3ea; --err:#9b2c2c; --err-bg:#fbeaea; --gold:#8a6a10;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+  .wrap{max-width:720px;margin:0 auto;padding:28px 16px 48px}
+  .eyebrow{font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  h1{font:600 22px/1.25 var(--sans);margin:0 0 4px;text-wrap:balance}
+  .sub{color:var(--ink-2);margin:0 0 18px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin:0 0 14px}
+  .kv dt{color:var(--muted);font-size:13px;margin:0}
+  .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+  pre{margin:0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;color:var(--ink-2)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+  .btn{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--sans);padding:11px 16px;border-radius:8px;cursor:pointer}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.pri:hover{background:var(--accent-ink)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .note{font-size:13px;color:var(--muted);margin-top:12px}
+  .msg{border-radius:8px;padding:12px 14px;margin-top:16px;font-size:14px}
+  .msg.ok{background:var(--ok-bg);color:var(--ok);border:1px solid #c6dfc9}
+  .msg.err{background:var(--err-bg);color:var(--err);border:1px solid #efc4c4}
+  .kod{font:600 20px/1.2 var(--mono);letter-spacing:.04em;margin:6px 0 2px;color:var(--ink)}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-right-color:transparent;border-radius:50%;animation:d .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes d{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.spin{animation:none}}
+  @media (max-width:480px){.kv{grid-template-columns:1fr}.kv dt{margin-top:4px}}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">GSÜ Derslik Koordinatörlüğü</p>
+  <h1 id="baslik">Derslik talebi</h1>
+  <p class="sub" id="alt">Talep verisi okunuyor…</p>
+
+  <div class="card" id="kart" hidden>
+    <dl class="kv">
+      <dt>Talep eden birim</dt><dd id="fBirim"></dd>
+      <dt>Ad soyad</dt><dd id="fAd"></dd>
+      <dt>E-posta</dt><dd id="fEposta"></dd>
+      <dt>Tür</dt><dd id="fTur"></dd>
+    </dl>
+    <pre id="metin"></pre>
+    <div class="row" id="eylem">
+      <button class="btn pri" id="gonder" type="button">Onaylıyorum, talebi gönder</button>
+      <span class="note" style="margin:0">Göndermezseniz bu sekmeyi kapatmanız yeterli.</span>
+    </div>
+    <p class="note">Adınız, e-posta ve telefon bilgileriniz yalnızca bu talebin işlenmesi ve size dönüş yapılması için kaydedilir. Talep, koordinatörlük onayıyla kesinleşir.</p>
+    <div id="sonuc"></div>
+  </div>
+
+  <div class="card" id="bos" hidden>
+    <p style="margin:0 0 10px">Bu sayfa, Derslik Panosu'ndaki <b>Talep Formu</b> sekmesinden <b>Gönder</b> düğmesiyle açılır. Doğrudan açıldığında gönderilecek bir talep bulunmaz.</p>
+    <a id="panoLink" href="#" target="_blank" rel="noopener">Derslik Panosu'na git</a>
+  </div>
+</div>
+
+<script>
+(function(){
+  var EXEC = "https://script.google.com/macros/s/AKfycbyIn0YKYxS72xLgx35Uvhci_kq6lbpa9DbvihmyoplGCX45ye-1eCvKvPtpU_J-WNUf/exec";   // Apps Script köprüsü (doPost)
+  var PANO = "https://claude.ai/artifact/7T6uMPXwZzUASSDsgp39Rw";
+  var TUR = { etk:"Etkinlik / salon tahsisi", ders:"Ders (haftalık program)", telafi:"Telafi dersi" };
+  var $ = function(id){ return document.getElementById(id); };
+  var yuk = "", veri = null;
+
+  function b64coz(s){
+    s = s.replace(/-/g,"+").replace(/_/g,"/"); while (s.length % 4) s += "=";
+    var bin = atob(s), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  function sunucu(islem){
+    return fetch(EXEC, { method: "POST", body: JSON.stringify({ islem: islem, yuk: yuk }), redirect: "follow", credentials: "omit" })
+      .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  function yedekGoster(){
+    if ($("yedek")) return;
+    var p = document.createElement("p"); p.className = "note"; p.id = "yedek";
+    p.innerHTML = 'Yedek yol: <a href="' + EXEC + "#" + encodeURIComponent(yuk).replace(/%2D/gi,"-").replace(/%5F/gi,"_") + '" target="_blank" rel="noopener">talebi Google üzerindeki onay sayfasında aç</a> (birden fazla Google hesabı açıksa gizli pencerede deneyin).';
+    $("sonuc").appendChild(p);
+  }
+  function bosGoster(){
+    $("alt").textContent = "Gönderilecek talep bulunamadı.";
+    $("panoLink").href = PANO; $("bos").hidden = false;
+  }
+  function goster(){
+    var j = veri.j || {};
+    $("baslik").textContent = (veri.k || "Derslik talebi");
+    $("alt").textContent = "Aşağıdaki talebi kontrol edin; doğruysa onaylayıp gönderin.";
+    $("fBirim").textContent = j.b || "—"; $("fAd").textContent = j.k || "—"; $("fEposta").textContent = j.e || "—";
+    $("fTur").textContent = TUR[j.t] || (j.t || "—");
+    $("metin").textContent = String(veri.m || "").replace(/\n?\[\[TALEP[\s\S]*?\]\]\s*$/, "").trim();
+    $("kart").hidden = false;
+  }
+  function hata(m){
+    if (bekci) { clearTimeout(bekci); bekci = null; }
+    var d = document.createElement("div"); d.className = "msg err"; d.textContent = m; $("sonuc").innerHTML = ""; $("sonuc").appendChild(d);
+    $("gonder").disabled = false; $("gonder").innerHTML = "Yeniden dene";
+  }
+  var bekci = null;
+  function basari(r){
+    if (bekci) { clearTimeout(bekci); bekci = null; }
+    var b = $("gonder"); b.disabled = true; b.innerHTML = "Gönderildi ✓";
+    $("eylem").hidden = true;
+    var d = document.createElement("div"); d.className = "msg ok";
+    d.innerHTML = "<div>Talebiniz koordinatörlüğe iletildi (" + r.zaman + ")" + (r.tekrar ? " — bu talep daha önce alınmıştı, yeniden gönderilmedi" : "") + ".</div><div class='kod'>" + r.tk + "</div>" +
+                  "<div>Takip kodunuzu not edin" + (r.onay ? "; bir kopyası e-posta adresinize gönderildi" : "") + ". Talep, koordinatörlük onayıyla kesinleşir; sonuç e-postayla bildirilir. Bu sekmeyi kapatabilirsiniz.</div>";
+    $("sonuc").innerHTML = ""; $("sonuc").appendChild(d);
+    $("alt").textContent = "Gönderildi.";
+    d.scrollIntoView({ block: "nearest" });
+  }
+  function durumSor(){
+    var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Durum sorgulanıyor…';
+    sunucu("durum").then(function(r){
+        if (r && r.ok) { basari(r); return; }
+        hata("Talep henüz kayıtlara ulaşmamış görünüyor. 'Yeniden dene' ile tekrar gönderebilirsiniz; aynı talep iki kez kaydedilmez.");
+      }).catch(function(e){ hata("Durum sorgulanamadı: " + (e && e.message ? e.message : e)); });
+  }
+  function gonder(){
+    var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Gönderiliyor…';
+    $("sonuc").innerHTML = "";
+    if (bekci) clearTimeout(bekci);
+    bekci = setTimeout(function(){
+      bekci = null;
+      var d = document.createElement("div"); d.className = "msg err";
+      d.innerHTML = "Yanıt gecikti. Talebiniz büyük olasılıkla iletildi; e-posta kutunuza takip kodu gelip gelmediğine bakın ya da durumu sorgulayın. ";
+      var s = document.createElement("button"); s.type = "button"; s.className = "btn"; s.textContent = "Durumu sorgula"; s.onclick = durumSor;
+      d.appendChild(s); $("sonuc").appendChild(d);
+    }, 45000);
+    sunucu("gonder").then(function(r){
+        try {
+          if (!r || !r.ok) { hata((r && r.hata) || "Gönderilemedi. Lütfen yeniden deneyin."); return; }
+          basari(r);
+        } catch (e) { hata("Sayfa hatası: " + (e && e.message ? e.message : e) + " — talebiniz iletilmiş olabilir; e-postanızı kontrol edin."); }
+      }).catch(function(e){ hata("Bağlantı hatası: " + (e && e.message ? e.message : e) + " — yeniden deneyin; aynı talep iki kez kaydedilmez. Sorun sürerse aşağıdaki yedek bağlantıyı kullanın."); yedekGoster(); });
+  }
+  $("gonder").onclick = gonder;
+
+  (function(){
+    yuk = String(location.hash || "");
+    if (yuk.charAt(0) === "#") yuk = yuk.slice(1);
+    if (!yuk) { var q = new URLSearchParams(location.search); yuk = q.get("d") || ""; }
+    if (!yuk) { bosGoster(); return; }
+    try { veri = JSON.parse(b64coz(yuk)); } catch (e) { veri = null; }
+    if (!veri || typeof veri !== "object" || !veri.j) { bosGoster(); $("alt").textContent = "Talep verisi çözümlenemedi; panodaki formdan yeniden gönderin."; return; }
+    goster();
+  })();
+})();
+</script>
+</body>
+</html>
