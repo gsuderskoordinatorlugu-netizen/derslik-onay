@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Derslik Talebi · Onay</title>
+<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik). Talep verisi #fragment ile gelir; gönderim Apps Script köprüsüne (EXEC) kimlik bilgisi taşımayan fetch POST ile yapılır — birden fazla Google hesabı açık olsa bile çalışır. -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root{
@@ -71,7 +72,8 @@
 
 <script>
 (function(){
-  var PANO = <?!= JSON.stringify(AYAR.panoAdresi) ?>;
+  var EXEC = "https://script.google.com/macros/s/AKfycbyIn0YKYxS72xLgx35Uvhci_kq6lbpa9DbvihmyoplGCX45ye-1eCvKvPtpU_J-WNUf/exec";   // Apps Script köprüsü (doPost)
+  var PANO = "https://claude.ai/artifact/7T6uMPXwZzUASSDsgp39Rw";
   var TUR = { etk:"Etkinlik / salon tahsisi", kulup:"Öğrenci kulübü etkinliği", ders:"Ders (haftalık program)", telafi:"Telafi dersi" };
   var $ = function(id){ return document.getElementById(id); };
   var yuk = "", veri = null;
@@ -81,6 +83,16 @@
     var bin = atob(s), bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new TextDecoder("utf-8").decode(bytes);
+  }
+  function sunucu(islem){
+    return fetch(EXEC, { method: "POST", body: JSON.stringify({ islem: islem, yuk: yuk }), redirect: "follow", credentials: "omit" })
+      .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  function yedekGoster(){
+    if ($("yedek")) return;
+    var p = document.createElement("p"); p.className = "note"; p.id = "yedek";
+    p.innerHTML = 'Yedek yol: <a href="' + EXEC + "#" + encodeURIComponent(yuk).replace(/%2D/gi,"-").replace(/%5F/gi,"_") + '" target="_blank" rel="noopener">talebi Google üzerindeki onay sayfasında aç</a> (birden fazla Google hesabı açıksa gizli pencerede deneyin).';
+    $("sonuc").appendChild(p);
   }
   function bosGoster(){
     $("alt").textContent = "Gönderilecek talep bulunamadı.";
@@ -114,13 +126,10 @@
   }
   function durumSor(){
     var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Durum sorgulanıyor…';
-    google.script.run
-      .withSuccessHandler(function(r){
+    sunucu("durum").then(function(r){
         if (r && r.ok) { basari(r); return; }
         hata("Talep henüz kayıtlara ulaşmamış görünüyor. 'Yeniden dene' ile tekrar gönderebilirsiniz; aynı talep iki kez kaydedilmez.");
-      })
-      .withFailureHandler(function(e){ hata("Durum sorgulanamadı: " + (e && e.message ? e.message : e)); })
-      .durumSor(yuk);
+      }).catch(function(e){ hata("Durum sorgulanamadı: " + (e && e.message ? e.message : e)); });
   }
   function gonder(){
     var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Gönderiliyor…';
@@ -133,26 +142,24 @@
       var s = document.createElement("button"); s.type = "button"; s.className = "btn"; s.textContent = "Durumu sorgula"; s.onclick = durumSor;
       d.appendChild(s); $("sonuc").appendChild(d);
     }, 45000);
-    google.script.run
-      .withSuccessHandler(function(r){
+    sunucu("gonder").then(function(r){
         try {
           if (!r || !r.ok) { hata((r && r.hata) || "Gönderilemedi. Lütfen yeniden deneyin."); return; }
           basari(r);
         } catch (e) { hata("Sayfa hatası: " + (e && e.message ? e.message : e) + " — talebiniz iletilmiş olabilir; e-postanızı kontrol edin."); }
-      })
-      .withFailureHandler(function(e){ hata("Bağlantı hatası: " + (e && e.message ? e.message : e) + " — yeniden deneyin; aynı talep iki kez kaydedilmez."); })
-      .talepGonder(yuk);
+      }).catch(function(e){ hata("Bağlantı hatası: " + (e && e.message ? e.message : e) + " — yeniden deneyin; aynı talep iki kez kaydedilmez. Sorun sürerse aşağıdaki yedek bağlantıyı kullanın."); yedekGoster(); });
   }
   $("gonder").onclick = gonder;
 
-  google.script.url.getLocation(function(loc){
-    yuk = (loc && loc.hash) ? String(loc.hash) : ((loc && loc.parameter && loc.parameter.d) ? String(loc.parameter.d) : "");
+  (function(){
+    yuk = String(location.hash || "");
     if (yuk.charAt(0) === "#") yuk = yuk.slice(1);
+    if (!yuk) { var q = new URLSearchParams(location.search); yuk = q.get("d") || ""; }
     if (!yuk) { bosGoster(); return; }
     try { veri = JSON.parse(b64coz(yuk)); } catch (e) { veri = null; }
     if (!veri || typeof veri !== "object" || !veri.j) { bosGoster(); $("alt").textContent = "Talep verisi çözümlenemedi; panodaki formdan yeniden gönderin."; return; }
     goster();
-  });
+  })();
 })();
 </script>
 </body>
