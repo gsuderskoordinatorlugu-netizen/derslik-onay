@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Derslik Talebi · Onay</title>
-<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik). Talep verisi #fragment ile gelir; gönderim Apps Script köprüsüne (EXEC) kimlik bilgisi taşımayan fetch POST ile yapılır — birden fazla Google hesabı açık olsa bile çalışır. -->
+<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik), sürüm 3 (29.09.2026: dilekçe / ek belge yükleme).
+     Talep verisi #fragment ile gelir; gönderim Apps Script köprüsüne (EXEC) kimlik bilgisi taşımayan fetch POST ile yapılır —
+     birden fazla Google hesabı açık olsa bile çalışır. Ek belge (PDF/JPG/PNG ≤ 4 MB) base64 olarak aynı POST içinde gider;
+     fotoğraflar tarayıcıda küçültülür. -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root{
@@ -28,6 +31,7 @@
   .btn{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--sans);padding:11px 16px;border-radius:8px;cursor:pointer}
   .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
   .btn.pri:hover{background:var(--accent-ink)}
+  .btn.sm{padding:7px 11px;font-size:12.5px}
   .btn:disabled{opacity:.55;cursor:default}
   .btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   .note{font-size:13px;color:var(--muted);margin-top:12px}
@@ -40,6 +44,13 @@
   @media (prefers-reduced-motion:reduce){.spin{animation:none}}
   @media (max-width:480px){.kv{grid-template-columns:1fr}.kv dt{margin-top:4px}}
   a{color:var(--accent)}
+  .ekk{margin-top:14px;padding:12px 14px;border:1px dashed var(--line);border-radius:8px;background:#fbfaf7}
+  .ekl{display:block;font-weight:600;font-size:13.5px;margin-bottom:6px}
+  .ekk input[type=file]{font:13px var(--sans);max-width:100%;color:var(--ink-2)}
+  .ekk .note{margin-top:6px}
+  .ekozet{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:8px;font-size:13.5px}
+  .ekozet .ad{font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere}
+  .ekk .msg{margin-top:8px;padding:8px 10px;font-size:13px}
 </style>
 </head>
 <body>
@@ -56,11 +67,20 @@
       <dt>Tür</dt><dd id="fTur"></dd>
     </dl>
     <pre id="metin"></pre>
+
+    <div class="ekk" id="ekAlan">
+      <label class="ekl" for="ekDosya" id="ekEtiket">Dilekçe / ek belge (isteğe bağlı)</label>
+      <input type="file" id="ekDosya" accept="application/pdf,image/jpeg,image/png">
+      <div class="note" id="ekNot">PDF ya da fotoğraf (JPG/PNG), en çok 4 MB. Fotoğraflar gönderilmeden önce otomatik küçültülür.</div>
+      <div class="ekozet" id="ekOzet" hidden><span class="ad" id="ekAd"></span><button type="button" class="btn sm" id="ekKaldir">Kaldır</button></div>
+      <div class="msg err" id="ekHata" hidden></div>
+    </div>
+
     <div class="row" id="eylem">
       <button class="btn pri" id="gonder" type="button">Onaylıyorum, talebi gönder</button>
       <span class="note" style="margin:0">Göndermezseniz bu sekmeyi kapatmanız yeterli.</span>
     </div>
-    <p class="note">Adınız, e-posta ve telefon bilgileriniz yalnızca bu talebin işlenmesi ve size dönüş yapılması için kaydedilir. Talep, koordinatörlük onayıyla kesinleşir.</p>
+    <p class="note">Adınız, e-posta ve telefon bilgileriniz ile eklediğiniz belge yalnızca bu talebin işlenmesi ve size dönüş yapılması için kaydedilir. Talep, koordinatörlük onayıyla kesinleşir.</p>
     <div id="sonuc"></div>
   </div>
 
@@ -75,8 +95,10 @@
   var EXEC = "https://script.google.com/macros/s/AKfycbyIn0YKYxS72xLgx35Uvhci_kq6lbpa9DbvihmyoplGCX45ye-1eCvKvPtpU_J-WNUf/exec";   // Apps Script köprüsü (doPost)
   var PANO = "https://claude.ai/artifact/7T6uMPXwZzUASSDsgp39Rw";
   var TUR = { etk:"Etkinlik / salon tahsisi", kulup:"Öğrenci kulübü etkinliği", ders:"Ders (haftalık program)", telafi:"Telafi dersi" };
+  var EK_SINIR = 4 * 1024 * 1024;          // bayt (köprüdeki AYAR.ek.enBuyukBayt ile aynı)
+  var EK_EN = 2000;                        // fotoğrafın uzun kenarı en çok bu kadar piksel
   var $ = function(id){ return document.getElementById(id); };
-  var yuk = "", veri = null;
+  var yuk = "", veri = null, ek = null;
 
   function b64coz(s){
     s = s.replace(/-/g,"+").replace(/_/g,"/"); while (s.length % 4) s += "=";
@@ -85,13 +107,15 @@
     return new TextDecoder("utf-8").decode(bytes);
   }
   function sunucu(islem){
-    return fetch(EXEC, { method: "POST", body: JSON.stringify({ islem: islem, yuk: yuk }), redirect: "follow", credentials: "omit" })
+    var govde = { islem: islem, yuk: yuk };
+    if (islem === "gonder" && ek) govde.ek = { ad: ek.ad, tur: ek.tur, veri: ek.veri };
+    return fetch(EXEC, { method: "POST", body: JSON.stringify(govde), redirect: "follow", credentials: "omit" })
       .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
   }
   function yedekGoster(){
     if ($("yedek")) return;
     var p = document.createElement("p"); p.className = "note"; p.id = "yedek";
-    p.innerHTML = 'Yedek yol: <a href="' + EXEC + "#" + encodeURIComponent(yuk).replace(/%2D/gi,"-").replace(/%5F/gi,"_") + '" target="_blank" rel="noopener">talebi Google üzerindeki onay sayfasında aç</a> (birden fazla Google hesabı açıksa gizli pencerede deneyin).';
+    p.innerHTML = 'Yedek yol: <a href="' + EXEC + "#" + encodeURIComponent(yuk).replace(/%2D/gi,"-").replace(/%5F/gi,"_") + '" target="_blank" rel="noopener">talebi Google üzerindeki onay sayfasında aç</a> (birden fazla Google hesabı açıksa gizli pencerede deneyin' + (ek ? "; ek belgeyi orada yeniden seçmeniz gerekir" : "") + ').';
     $("sonuc").appendChild(p);
   }
   function bosGoster(){
@@ -105,8 +129,73 @@
     $("fBirim").textContent = j.b || "—"; $("fAd").textContent = j.k || "—"; $("fEposta").textContent = j.e || "—";
     $("fTur").textContent = TUR[j.t] || (j.t || "—");
     $("metin").textContent = String(veri.m || "").replace(/\n?\[\[TALEP[\s\S]*?\]\]\s*$/, "").trim();
+    if (j.t === "kulup") {
+      $("ekEtiket").textContent = "SKS / kulüp etkinlik dilekçesi (PDF ya da fotoğraf)";
+      $("ekNot").textContent = "Kulüp etkinlikleri için SKS'ye verilen dilekçenin kopyasını buraya ekleyebilirsiniz (PDF, JPG ya da PNG; en çok 4 MB; fotoğraflar otomatik küçültülür). Şimdi ekleyemezseniz sonradan e-postayla iletmeniz istenir.";
+    } else {
+      $("ekEtiket").textContent = "Ek belge (isteğe bağlı)";
+      $("ekNot").textContent = "Birim yazısı, davet ya da program gibi destekleyici bir belge ekleyebilirsiniz: PDF ya da fotoğraf (JPG/PNG), en çok 4 MB. Fotoğraflar otomatik küçültülür.";
+    }
     $("kart").hidden = false;
   }
+
+  /* ---- ek belge ---- */
+  function ekHata(m){ var h = $("ekHata"); h.textContent = m; h.hidden = false; ek = null; $("ekOzet").hidden = true; $("ekDosya").value = ""; }
+  function ekGoster(){
+    $("ekHata").hidden = true;
+    if (!ek) { $("ekOzet").hidden = true; return; }
+    $("ekAd").textContent = ek.ad + " · " + boyut(ek.boyut) + (ek.kucultuldu ? " (küçültüldü)" : "");
+    $("ekOzet").hidden = false;
+  }
+  function boyut(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+  function okuBase64(f, cb, hataCb){
+    var r = new FileReader();
+    r.onload = function(){ var s = String(r.result || ""); cb(s.slice(s.indexOf(",") + 1)); };
+    r.onerror = function(){ hataCb("Dosya okunamadı."); };
+    r.readAsDataURL(f);
+  }
+  function gorselKucult(f, cb, hataCb){
+    var url = URL.createObjectURL(f), img = new Image();
+    img.onload = function(){
+      URL.revokeObjectURL(url);
+      var w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h) { hataCb("Görsel okunamadı."); return; }
+      var olcek = Math.min(1, EK_EN / Math.max(w, h)), cw = Math.max(1, Math.round(w * olcek)), ch = Math.max(1, Math.round(h * olcek));
+      var c = document.createElement("canvas"); c.width = cw; c.height = ch;
+      var ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(img, 0, 0, cw, ch);
+      var kalite = 0.86;
+      for (;;) {
+        var d = c.toDataURL("image/jpeg", kalite), b64 = d.slice(d.indexOf(",") + 1), bayt = Math.floor(b64.length * 3 / 4);
+        if (bayt <= EK_SINIR || kalite <= 0.5) {
+          if (bayt > EK_SINIR) { hataCb("Fotoğraf küçültülse de 4 MB sınırını aşıyor; daha küçük bir dosya seçin."); return; }
+          cb({ ad: f.name.replace(/\.[^.]+$/, "") + ".jpg", tur: "image/jpeg", veri: b64, boyut: bayt, kucultuldu: (olcek < 1 || bayt < f.size * 0.9) });
+          return;
+        }
+        kalite -= 0.1;
+      }
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); hataCb("Görsel okunamadı (desteklenmeyen biçim). PDF ya da JPG/PNG seçin."); };
+    img.src = url;
+  }
+  function dosyaSec(f){
+    ek = null; ekGoster();
+    if (!f) return;
+    var tur = String(f.type || "").toLowerCase(); if (tur === "image/jpg") tur = "image/jpeg";
+    if (!tur) { var ad = f.name.toLowerCase(); tur = /\.pdf$/.test(ad) ? "application/pdf" : /\.png$/.test(ad) ? "image/png" : /\.jpe?g$/.test(ad) ? "image/jpeg" : ""; }
+    if (tur === "application/pdf") {
+      if (f.size > EK_SINIR) { ekHata("PDF en çok 4 MB olabilir (" + boyut(f.size) + " seçildi). Taranmış dilekçeyi daha düşük çözünürlükte kaydedip yeniden deneyin."); return; }
+      okuBase64(f, function(b64){ ek = { ad: f.name, tur: tur, veri: b64, boyut: f.size }; ekGoster(); }, ekHata);
+    } else if (tur === "image/jpeg" || tur === "image/png") {
+      $("ekAd").textContent = "Fotoğraf hazırlanıyor…"; $("ekOzet").hidden = false;
+      gorselKucult(f, function(e){ ek = e; ekGoster(); }, ekHata);
+    } else {
+      ekHata("Yalnız PDF, JPG ya da PNG dosyası eklenebilir.");
+    }
+  }
+  $("ekDosya").addEventListener("change", function(){ dosyaSec(this.files && this.files[0]); });
+  $("ekKaldir").onclick = function(){ ek = null; $("ekDosya").value = ""; ekGoster(); };
+
+  /* ---- gönderim ---- */
   function hata(m){
     if (bekci) { clearTimeout(bekci); bekci = null; }
     var d = document.createElement("div"); d.className = "msg err"; d.textContent = m; $("sonuc").innerHTML = ""; $("sonuc").appendChild(d);
@@ -116,9 +205,12 @@
   function basari(r){
     if (bekci) { clearTimeout(bekci); bekci = null; }
     var b = $("gonder"); b.disabled = true; b.innerHTML = "Gönderildi ✓";
-    $("eylem").hidden = true;
+    $("eylem").hidden = true; $("ekAlan").hidden = true;
     var d = document.createElement("div"); d.className = "msg ok";
-    d.innerHTML = "<div>Talebiniz koordinatörlüğe iletildi (" + r.zaman + ")" + (r.tekrar ? " — bu talep daha önce alınmıştı, yeniden gönderilmedi" : "") + ".</div><div class='kod'>" + r.tk + "</div>" +
+    var ekSatir = "";
+    if (r.ek && r.ek.ad) ekSatir = "<div>Ek belge (" + String(r.ek.ad).replace(/[<>&]/g, "") + ") talebinizle birlikte iletildi.</div>";
+    else if (ek && r.tekrar) ekSatir = "<div>Bu talep daha önce alındığı için ek belge yeniden gönderilmedi; gerekiyorsa belgeyi e-postayla iletin.</div>";
+    d.innerHTML = "<div>Talebiniz koordinatörlüğe iletildi (" + r.zaman + ")" + (r.tekrar ? " — bu talep daha önce alınmıştı, yeniden gönderilmedi" : "") + ".</div><div class='kod'>" + r.tk + "</div>" + ekSatir +
                   "<div>Takip kodunuzu not edin" + (r.onay ? "; bir kopyası e-posta adresinize gönderildi" : "") + ". Talep, koordinatörlük onayıyla kesinleşir; sonucu e-postayla ve Derslik Panosu'ndaki <b>Talep Durumu</b> sekmesinden izleyebilirsiniz. Bu sekmeyi kapatabilirsiniz.</div>";
     $("sonuc").innerHTML = ""; $("sonuc").appendChild(d);
     $("alt").textContent = "Gönderildi.";
@@ -132,7 +224,8 @@
       }).catch(function(e){ hata("Durum sorgulanamadı: " + (e && e.message ? e.message : e)); });
   }
   function gonder(){
-    var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Gönderiliyor…';
+    if (!$("ekOzet").hidden && !ek) { var h = $("ekHata"); h.textContent = "Fotoğraf hazırlanıyor; birkaç saniye sonra yeniden deneyin."; h.hidden = false; return; }   // fotoğraf hâlâ küçültülüyor
+    var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>' + (ek ? "Gönderiliyor (belgeyle birlikte)…" : "Gönderiliyor…");
     $("sonuc").innerHTML = "";
     if (bekci) clearTimeout(bekci);
     bekci = setTimeout(function(){
@@ -141,7 +234,7 @@
       d.innerHTML = "Yanıt gecikti. Talebiniz büyük olasılıkla iletildi; e-posta kutunuza takip kodu gelip gelmediğine bakın ya da durumu sorgulayın. ";
       var s = document.createElement("button"); s.type = "button"; s.className = "btn"; s.textContent = "Durumu sorgula"; s.onclick = durumSor;
       d.appendChild(s); $("sonuc").appendChild(d);
-    }, 45000);
+    }, 45000 + (ek ? Math.ceil(ek.boyut / 1048576) * 20000 : 0));
     sunucu("gonder").then(function(r){
         try {
           if (!r || !r.ok) { hata((r && r.hata) || "Gönderilemedi. Lütfen yeniden deneyin."); return; }
