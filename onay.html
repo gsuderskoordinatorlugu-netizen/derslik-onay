@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Derslik Talebi · Onay</title>
-<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik), sürüm 3 (29.09.2026: dilekçe / ek belge yükleme).
+<!-- GSÜ Derslik Koordinatörlüğü — dış onay sayfası (statik), sürüm 4 (03.10.2026: kulüp taleplerinde dilekçe yükleme kuralı — dilekçesi
+     yüklenen tek günlük talepler çakışma yoksa saatlik kontrolde onaylanır, yüklenmeyenler koordinatör onayına düşer; dilekçesiz gönderimde
+     bir kez hatırlatma). Sürüm 3 (29.09.2026): dilekçe / ek belge yükleme.
      Talep verisi #fragment ile gelir; gönderim Apps Script köprüsüne (EXEC) kimlik bilgisi taşımayan fetch POST ile yapılır —
      birden fazla Google hesabı açık olsa bile çalışır. Ek belge (PDF/JPG/PNG ≤ 4 MB) base64 olarak aynı POST içinde gider;
      fotoğraflar tarayıcıda küçültülür. -->
@@ -98,7 +100,8 @@
   var EK_SINIR = 4 * 1024 * 1024;          // bayt (köprüdeki AYAR.ek.enBuyukBayt ile aynı)
   var EK_EN = 2000;                        // fotoğrafın uzun kenarı en çok bu kadar piksel
   var $ = function(id){ return document.getElementById(id); };
-  var yuk = "", veri = null, ek = null;
+  var yuk = "", veri = null, ek = null, dilekceUyarildi = false;
+  var GONDER_ETIKET = "Onaylıyorum, talebi gönder";
 
   function b64coz(s){
     s = s.replace(/-/g,"+").replace(/_/g,"/"); while (s.length % 4) s += "=";
@@ -130,8 +133,8 @@
     $("fTur").textContent = TUR[j.t] || (j.t || "—");
     $("metin").textContent = String(veri.m || "").replace(/\n?\[\[TALEP[\s\S]*?\]\]\s*$/, "").trim();
     if (j.t === "kulup") {
-      $("ekEtiket").textContent = "SKS / kulüp etkinlik dilekçesi (PDF ya da fotoğraf)";
-      $("ekNot").textContent = "Kulüp etkinlikleri için SKS'ye verilen dilekçenin kopyasını buraya ekleyebilirsiniz (PDF, JPG ya da PNG; en çok 4 MB; fotoğraflar otomatik küçültülür). Şimdi ekleyemezseniz sonradan e-postayla iletmeniz istenir.";
+      $("ekEtiket").textContent = "Kulüp etkinlik dilekçesi (danışman imzalı · PDF ya da fotoğraf)";
+      $("ekNot").textContent = "Kulüp etkinliği taleplerinde dilekçeyi buraya yükleyin (PDF, JPG ya da PNG; en çok 4 MB; fotoğraflar otomatik küçültülür). Dilekçesi yüklenen tek günlük talepler, programla çakışmıyorsa saatlik kontrolde onaylanır; dilekçe yüklenmezse talep koordinatörlük onayına düşer.";
     } else {
       $("ekEtiket").textContent = "Ek belge (isteğe bağlı)";
       $("ekNot").textContent = "Birim yazısı, davet ya da program gibi destekleyici bir belge ekleyebilirsiniz: PDF ya da fotoğraf (JPG/PNG), en çok 4 MB. Fotoğraflar otomatik küçültülür.";
@@ -146,6 +149,7 @@
     if (!ek) { $("ekOzet").hidden = true; return; }
     $("ekAd").textContent = ek.ad + " · " + boyut(ek.boyut) + (ek.kucultuldu ? " (küçültüldü)" : "");
     $("ekOzet").hidden = false;
+    if (dilekceUyarildi && !$("gonder").disabled) $("gonder").innerHTML = GONDER_ETIKET;   // dilekçe eklendi: düğme normale döner
   }
   function boyut(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
   function okuBase64(f, cb, hataCb){
@@ -225,6 +229,13 @@
   }
   function gonder(){
     if (!$("ekOzet").hidden && !ek) { var h = $("ekHata"); h.textContent = "Fotoğraf hazırlanıyor; birkaç saniye sonra yeniden deneyin."; h.hidden = false; return; }   // fotoğraf hâlâ küçültülüyor
+    if (veri && veri.j && veri.j.t === "kulup" && !ek && !dilekceUyarildi) {   // kulüp talebi dilekçesiz: bir kez hatırlat, engelleme
+      dilekceUyarildi = true;
+      var u = $("ekHata"); u.textContent = "Dilekçe yüklemediniz. Dilekçesiz kulüp talepleri koordinatörlük onayına düşer. Dilekçeyi yukarıdaki alandan ekleyebilir ya da düğmeye yeniden basarak dilekçesiz gönderebilirsiniz."; u.hidden = false;
+      $("gonder").innerHTML = "Dilekçesiz gönder";
+      u.scrollIntoView({ block: "nearest" });
+      return;
+    }
     var b = $("gonder"); b.disabled = true; b.innerHTML = '<span class="spin"></span>' + (ek ? "Gönderiliyor (belgeyle birlikte)…" : "Gönderiliyor…");
     $("sonuc").innerHTML = "";
     if (bekci) clearTimeout(bekci);
